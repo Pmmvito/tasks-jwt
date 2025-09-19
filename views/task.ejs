@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tasks CRUD</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-4">
+        <!-- Header -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>Tasks CRUD</h2>
+            <div id="user-info" class="d-none">
+                <span id="user-name" class="me-3"></span>
+                <button class="btn btn-sm btn-outline-danger" onclick="logout()">Sair</button>
+            </div>
+        </div>
+
+        <!-- Alerta de login necessário -->
+        <div id="login-alert" class="alert alert-warning d-none">
+            Você precisa fazer login primeiro. <a href="/">Clique aqui</a>
+        </div>
+
+        <!-- CRUD Container -->
+        <div id="crud-container" class="d-none">
+            <!-- Formulário -->
+            <div class="card mb-4">
+                <div class="card-body">
+                    <form id="task-form">
+                        <input type="hidden" id="task-id">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <input type="text" class="form-control" id="task-title" placeholder="Título da task" required>
+                            </div>
+                            <div class="col-md-4">
+                                <input type="text" class="form-control" id="task-description" placeholder="Descrição">
+                            </div>
+                            <div class="col-md-2">
+                                <button type="submit" class="btn btn-primary w-100" id="submit-btn">Criar</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Tabela de Tasks -->
+            <div class="card">
+                <div class="card-body">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Título</th>
+                                <th>Descrição</th>
+                                <th>Data</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tasks-table">
+                            <tr>
+                                <td colspan="5" class="text-center">
+                                    <div class="spinner-border spinner-border-sm"></div> Carregando...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let token = null;
+        let editingId = null;
+
+        // Inicializar
+        document.addEventListener('DOMContentLoaded', function() {
+            const loginData = localStorage.getItem('loginData');
+            if (loginData) {
+                const data = JSON.parse(loginData);
+                if (data.token && data.user) {
+                    token = data.token;
+                    document.getElementById('user-name').textContent = data.user.name;
+                    document.getElementById('user-info').classList.remove('d-none');
+                    document.getElementById('crud-container').classList.remove('d-none');
+                    loadTasks();
+                    return;
+                }
+            }
+            document.getElementById('login-alert').classList.remove('d-none');
+        });
+
+        // Fazer requisição com token
+        async function apiRequest(url, options = {}) {
+            return fetch(url, {
+                ...options,
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                    ...options.headers
+                }
+            });
+        }
+
+        // Carregar tasks
+        async function loadTasks() {
+            try {
+                const response = await apiRequest('/api/task');
+                const tasks = await response.json();
+                
+                const tbody = document.getElementById('tasks-table');
+                if (tasks.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Nenhuma task encontrada</td></tr>';
+                    return;
+                }
+                
+                tbody.innerHTML = tasks.map(task => `
+                    <tr>
+                        <td>${task.id}</td>
+                        <td>${task.title}</td>
+                        <td>${task.description || '-'}</td>
+                        <td>${new Date(task.createdAt).toLocaleDateString('pt-BR')}</td>
+                        <td>
+                            <button class="btn btn-sm btn-warning me-1" onclick="editTask(${task.id}, '${task.title}', '${task.description || ''}')">
+                                Editar
+                            </button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteTask(${task.id})">
+                                Excluir
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                document.getElementById('tasks-table').innerHTML = 
+                    '<tr><td colspan="5" class="text-center text-danger">Erro ao carregar tasks</td></tr>';
+            }
+        }
+
+        // Criar/Atualizar task
+        document.getElementById('task-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const title = document.getElementById('task-title').value;
+            const description = document.getElementById('task-description').value;
+            const id = document.getElementById('task-id').value;
+            
+            try {
+                let response;
+                if (id) {
+                    // Atualizar (se a rota existir)
+                    response = await apiRequest(`/api/task/${id}`, {
+                        method: 'PUT',
+                        body: JSON.stringify({ title, description })
+                    });
+                } else {
+                    // Criar
+                    response = await apiRequest('/api/task', {
+                        method: 'POST',
+                        body: JSON.stringify({ title, description })
+                    });
+                }
+                
+                if (response.ok) {
+                    resetForm();
+                    loadTasks();
+                } else {
+                    alert('Erro ao salvar task');
+                }
+            } catch (error) {
+                alert('Erro de conexão');
+            }
+        });
+
+        // Editar task
+        function editTask(id, title, description) {
+            document.getElementById('task-id').value = id;
+            document.getElementById('task-title').value = title;
+            document.getElementById('task-description').value = description || '';
+            document.getElementById('submit-btn').textContent = 'Atualizar';
+            editingId = id;
+        }
+
+        // Excluir task
+        async function deleteTask(id) {
+            if (!confirm('Tem certeza que deseja excluir esta task?')) return;
+            
+            try {
+                const response = await apiRequest(`/api/task/${id}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    loadTasks();
+                } else {
+                    alert('Erro ao excluir task');
+                }
+            } catch (error) {
+                alert('Erro de conexão');
+            }
+        }
+
+        // Resetar formulário
+        function resetForm() {
+            document.getElementById('task-form').reset();
+            document.getElementById('task-id').value = '';
+            document.getElementById('submit-btn').textContent = 'Criar';
+            editingId = null;
+        }
+
+        // Logout
+        function logout() {
+            localStorage.removeItem('loginData');
+            window.location.href = '/';
+        }
+    </script>
+</body>
+</html>
